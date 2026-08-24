@@ -1,0 +1,30 @@
+[package]
+name = "awaza-chord"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "NICOLA同時打鍵判定のラッパ(awase::engine::NicolaFsmを直接利用)"
+
+[lib]
+name = "awaza_chord"
+path = "src/lib.rs"
+
+[dependencies]
+# awase / timed-fsm はタグピン(design doc ADR-B、`branch = "main"` は禁止)。
+# 現時点でのawase最新タグは v1.16.0。
+awase = { git = "https://github.com/cuzic/awase", tag = "v1.16.0" }
+timed-fsm = { git = "https://github.com/cuzic/awase", tag = "v1.16.0", package = "timed-fsm" }
+anyhow.workspace = true
+log.workspace = true
+
+[lints.rust]
+unsafe_code = "warn"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+# 日本語コメントで誤検知するため無効化(rust-nicola/crates/awase-linux/Cargo.toml踏襲)
+doc_markdown = "allow"

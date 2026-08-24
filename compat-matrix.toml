@@ -1,0 +1,27 @@
+# アプリ別動作確認表（design doc §5・§10.3）。
+# P0-3/P0-4/P0-7の実測結果をここに記録する。空の雛形（P0-1）。
+#
+# 項目:
+# 1. preeditの表示とカーソル追従
+# 2. 候補ウィンドウの位置
+# 3. 確定テキストの内容
+# 4. Ctrl系ショートカットの素通し
+# 5. フォーカス遷移時のpreeditの扱い
+# 6. 非適格キーとの順序（TF_ES_SYNC同期完了、§6.1）
+# 7. 変換取り消し（Backspace）の挙動
+
+[apps.notepad]
+tested_at = "2026-08-24"
+notes = "spike(experiments/tsf-edit-session-spike)で項目6を確認済み(14打鍵、失敗0件)"
+
+[apps.wezterm]
+tested_at = "2026-08-24"
+notes = "spikeで項目6を確認済み(55打鍵、失敗0件)。GPU描画のカスタムエディットコントロール"
+
+[apps.chrome]
+tested_at = ""
+notes = "P0-4で確認予定"
+
+[apps.vscode]
+tested_at = ""
+notes = "P0-4で確認予定(Electron)"

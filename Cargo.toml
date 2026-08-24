@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["crates/awaza-tip", "crates/awaza-chord"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cuzic/awaza"
+
+[workspace.dependencies]
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+panic = "abort"

@@ -1,0 +1,43 @@
+[package]
+name = "awaza-tip"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "awaza TSF TIP本体(COM DLL)"
+
+[lib]
+name = "awaza_tip"
+crate-type = ["cdylib"]
+
+[dependencies]
+awaza-chord = { path = "../awaza-chord" }
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.62"
+features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_Security",
+    "Win32_System_SystemServices",
+    "Win32_UI_TextServices",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[target.'cfg(windows)'.dependencies.windows-core]
+version = "0.62"
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+doc_markdown = "allow"
+multiple_unsafe_ops_per_block = "allow"
