@@ -761,10 +761,3 @@ fn unregister_inner() -> Result<()> {
     }
     Ok(())
 }
-
-// unused-import警告避け(TF_ANCHOR_END/TF_ST_CORRECTIONはP1で使う想定のため残す)
-#[allow(dead_code)]
-fn _reserved_for_p1(_a: windows::Win32::UI::TextServices::TF_ANCHOR, _b: u32) {
-    let _ = TF_ANCHOR_END;
-    let _ = TF_ST_CORRECTION;
-}

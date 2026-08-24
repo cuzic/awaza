@@ -13,6 +13,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 awaza-chord = { path = "../awaza-chord" }
+awase = { git = "https://github.com/cuzic/awase", tag = "v1.16.0" }
+timed-fsm = { git = "https://github.com/cuzic/awase", tag = "v1.16.0", package = "timed-fsm" }
 anyhow.workspace = true
 log.workspace = true
 env_logger.workspace = true
@@ -28,6 +30,7 @@ features = [
     "Win32_System_SystemServices",
     "Win32_UI_TextServices",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
 ]
 
 [target.'cfg(windows)'.dependencies.windows-core]
