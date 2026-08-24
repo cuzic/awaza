@@ -258,6 +258,28 @@ impl TipState {
         let composing = self.composition.borrow().is_some();
         let resp = self.chord.borrow_mut().on_timeout(timer_id, &phys, composing);
         self.apply_response(&ctx, &resp);
+        self.apply_timers(&resp.timers);
+    }
+
+    /// `Response::timers`(`TimerCommand::Set`/`Kill`)を実際のWin32タイマーに反映する。
+    /// `OnKeyDown`・`on_timer_fired`の両方から呼ぶ(P0-2.5のバグ修正: 以前は
+    /// `on_timer_fired`側でこれを呼んでおらず、`Kill`要求が無視されて
+    /// タイマーが無限に再発火し続けていた)。
+    fn apply_timers(&self, timers: &[timed_fsm::TimerCommand<usize>]) {
+        let hwnd = self.hwnd.get();
+        for timer in timers {
+            match timer {
+                timed_fsm::TimerCommand::Set { id, duration } => unsafe {
+                    let ms = u32::try_from(duration.as_millis()).unwrap_or(u32::MAX);
+                    log(&format!("apply_timers: Set id={id} ms={ms}"));
+                    SetTimer(Some(hwnd), *id, ms, None);
+                },
+                timed_fsm::TimerCommand::Kill { id } => unsafe {
+                    log(&format!("apply_timers: Kill id={id}"));
+                    let _ = KillTimer(Some(hwnd), *id);
+                },
+            }
+        }
     }
 
     /// `ChordResponse`(かな確定・投機出力等)を実際のpreedit更新に反映する。
@@ -438,20 +460,7 @@ impl ITfKeyEventSink_Impl for KeySink_Impl {
         let resp = self.state.chord.borrow_mut().on_event(event, &phys);
         log(&format!("OnKeyDown vk=0x{vk:02X} class={classification:?} resp={resp:?}"));
         self.state.apply_response(pic, &resp);
-
-        // タイマー要求をWM_TIMERへ変換する(P0-2.5)。
-        let hwnd = self.state.hwnd.get();
-        for timer in &resp.timers {
-            match timer {
-                timed_fsm::TimerCommand::Set { id, duration } => unsafe {
-                    let ms = u32::try_from(duration.as_millis()).unwrap_or(u32::MAX);
-                    SetTimer(Some(hwnd), *id, ms, None);
-                },
-                timed_fsm::TimerCommand::Kill { id } => unsafe {
-                    let _ = KillTimer(Some(hwnd), *id);
-                },
-            }
-        }
+        self.state.apply_timers(&resp.timers);
 
         // 現時点ではキーを消費しない(投機出力の実処理・確定処理はP1で本実装する)。
         Ok(BOOL(0))
