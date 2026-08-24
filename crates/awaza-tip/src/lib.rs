@@ -41,8 +41,7 @@ use windows::Win32::UI::TextServices::{
     ITfInputProcessorProfiles, ITfInsertAtSelection, ITfKeyEventSink, ITfKeyEventSink_Impl,
     ITfKeystrokeMgr, ITfRange, ITfTextInputProcessor, ITfTextInputProcessor_Impl, ITfThreadMgr,
     CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles, GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
-    GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT, GUID_TFCAT_TIP_KEYBOARD, TF_ANCHOR_END, TF_ES_READWRITE,
-    TF_ES_SYNC, TF_ST_CORRECTION,
+    GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT, GUID_TFCAT_TIP_KEYBOARD, TF_ES_READWRITE, TF_ES_SYNC,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, KillTimer, RegisterClassExW, SetTimer,
@@ -54,7 +53,7 @@ use awaza_chord::{ChordEngine, ChordResponse};
 use awase::config::ConfirmMode;
 use awase::engine::input_tracker::PhysicalKeyState;
 use awase::engine::InputContext;
-use awase::engine::{ModifierState, TIMER_PENDING, TIMER_SPECULATIVE};
+use awase::engine::ModifierState;
 use awase::types::{ImeRelevance, KeyAction, KeyClassification, KeyEventType, RawKeyEvent, VkCode};
 
 /// 簡易的な単調増加ミリ秒タイムスタンプ(`Timestamp`は`u64`のtype alias)。
@@ -305,7 +304,8 @@ impl TipState {
         let session_iface: ITfEditSession = session.into();
         let tid = self.tid.get();
         unsafe {
-            ctx.RequestEditSession(tid, &session_iface, TF_ES_SYNC | TF_ES_READWRITE)?;
+            let _: HRESULT =
+                ctx.RequestEditSession(tid, &session_iface, TF_ES_SYNC | TF_ES_READWRITE)?;
         }
         Ok(())
     }
