@@ -152,7 +152,7 @@ unsafe extern "system" fn timer_wndproc(
                 windows::Win32::UI::WindowsAndMessaging::GWLP_USERDATA,
             );
             if ptr != 0 {
-                let state = &*(ptr as *const TipState);
+                let state = state_from_raw(ptr as *const TipState);
                 let timer_id = wparam.0;
                 state.on_timer_fired(timer_id);
             }
@@ -251,16 +251,16 @@ impl TipState {
         }
     }
 
-    fn on_timer_fired(&self, timer_id: usize) {
+    fn on_timer_fired(self: &Rc<Self>, timer_id: usize) {
         log(&format!("on_timer_fired timer_id={timer_id}"));
-        let Some(ctx) = self.context.borrow().clone() else {
+        if self.context.borrow().is_none() {
             log("on_timer_fired: no context, ignoring");
             return;
-        };
+        }
         let phys = PhysicalKeyState::empty();
         let composing = self.composition.borrow().is_some();
         let resp = self.chord.borrow_mut().on_timeout(timer_id, &phys, composing);
-        self.apply_response(&ctx, &resp);
+        self.apply_response(&resp);
         self.apply_timers(&resp.timers);
     }
 
@@ -286,18 +286,18 @@ impl TipState {
     }
 
     /// `ChordResponse`(かな確定・投機出力等)を実際のpreedit更新に反映する。
-    /// P0-3: `ITfInsertAtSelection`+`StartComposition`で初回表示、以降は
-    /// `ITfRange::SetText`で更新する。
-    fn apply_response(&self, ctx: &ITfContext, resp: &ChordResponse) {
+    /// 既存compositionがあれば`ITfRange::SetText`で置き換え、無ければ
+    /// `ITfInsertAtSelection`+`StartComposition`で新規開始する
+    /// (`TipEditSession::DoEditSession`参照)。
+    fn apply_response(self: &Rc<Self>, resp: &ChordResponse) {
         if resp.actions.is_empty() && resp.timers.is_empty() {
             return;
         }
         log(&format!("apply_response: {resp:?}"));
 
-        // 現時点(P0-2/P0-2.5/P0-3の最初のパス)では、KeyAction::Char由来の
-        // かな1文字をpreeditにそのまま反映するだけの最小実装とする。
-        // KeyAction::Romaji(拗音)・SpecialKey(Backspace)・その他のバリアントは
-        // P0-6/P1で本実装する(ここでは無視してログに残すのみ)。
+        // 現時点ではKeyAction::Char由来のかな1文字をpreeditにそのまま反映する
+        // だけの実装とする。KeyAction::Romaji(拗音)・SpecialKey(Backspace)・
+        // その他のバリアントはP1で本実装する(ここでは無視してログに残すのみ)。
         let mut text_to_show: Option<String> = None;
         for action in &resp.actions {
             match action {
@@ -313,7 +313,7 @@ impl TipState {
         }
 
         if let Some(text) = text_to_show {
-            if let Err(e) = self.update_composition(ctx, &text) {
+            if let Err(e) = self.update_composition(&text) {
                 log(&format!("apply_response: update_composition failed: {e}"));
             } else {
                 self.preedit.replace(text);
@@ -321,9 +321,12 @@ impl TipState {
         }
     }
 
-    fn update_composition(&self, ctx: &ITfContext, text: &str) -> Result<()> {
+    fn update_composition(self: &Rc<Self>, text: &str) -> Result<()> {
+        let Some(ctx) = self.context.borrow().clone() else {
+            return Ok(());
+        };
         let session = TipEditSession {
-            state_context: ctx.clone(),
+            state: self.clone(),
             text: text.to_owned(),
         };
         let session_iface: ITfEditSession = session.into();
@@ -334,49 +337,119 @@ impl TipState {
         }
         Ok(())
     }
+
+    /// 現在のcompositionを確定(終了)する。「今は他の未処理キーが来たら直前の
+    /// compositionを確定する」という単純な安全弁(実際の確定キー・変換UIは
+    /// P1で実装)。preedit状態もクリアする。
+    fn confirm_composition(self: &Rc<Self>) {
+        if self.composition.borrow().is_none() {
+            return;
+        }
+        let Some(ctx) = self.context.borrow().clone() else {
+            return;
+        };
+        let session = TipEndCompositionSession {
+            state: self.clone(),
+        };
+        let session_iface: ITfEditSession = session.into();
+        let tid = self.tid.get();
+        unsafe {
+            if let Err(e) = ctx.RequestEditSession(tid, &session_iface, TF_ES_SYNC | TF_ES_READWRITE)
+            {
+                log(&format!("confirm_composition: RequestEditSession failed: {e}"));
+            }
+        }
+    }
 }
 
-/// composition開始/更新を行うedit session。`DoEditSession`の中で
-/// `ITfInsertAtSelection`/`StartComposition`/`ITfRange::SetText`を呼ぶ。
-/// 実際のcomposition保持・差し替えロジックは`TipState`が持つため、この
-/// セッションオブジェクトは`TipState`への参照を`OnKeyDown`側から都度
-/// 渡してもらう設計にはせず、まず「preeditに文字を出す」ことだけを最小限
-/// 実装する(P0-3の第一段階)。
+/// `GWLP_USERDATA`に積んだ生ポインタから`Rc<TipState>`を安全に復元する。
+/// `Rc::increment_strong_count`で参照カウントを先に増やしてから
+/// `Rc::from_raw`するため、元の所有者(`TspTip.state`)の参照を消費しない
+/// (両者が独立してdropできる)。
+fn state_from_raw(ptr: *const TipState) -> Rc<TipState> {
+    unsafe {
+        Rc::increment_strong_count(ptr);
+        Rc::from_raw(ptr)
+    }
+}
+
+/// composition開始/更新を行うedit session。既存compositionがあれば
+/// `ITfRange::SetText`で置き換え(preeditが正しく更新される)、無ければ
+/// `ITfInsertAtSelection`+`StartComposition`で新規開始し、結果を
+/// `TipState.composition`に保持する(以前は毎回新規挿入していたため、
+/// 2文字目以降でcompositionが積み重なり操作不能になるバグがあった。
+/// 実機テストで発見・修正)。
 #[implement(ITfEditSession)]
 struct TipEditSession {
-    state_context: ITfContext,
+    state: Rc<TipState>,
     text: String,
 }
 
 impl ITfEditSession_Impl for TipEditSession_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
-        unsafe {
-            let insert: ITfInsertAtSelection = self.state_context.cast()?;
-            let comp_services: ITfContextOwnerCompositionServices = self.state_context.cast()?;
-            let wtext = wide(&self.text);
-            // 末尾の\0は含めない(SetText/InsertTextAtSelectionはスライス長で判断する)。
-            let wtext = &wtext[..wtext.len().saturating_sub(1)];
-            let range: ITfRange = insert.InsertTextAtSelection(
-                ec,
-                windows::Win32::UI::TextServices::INSERT_TEXT_AT_SELECTION_FLAGS(0),
-                wtext,
-            )?;
-            let comp_sink = TipCompositionSink;
-            let comp_sink_iface: ITfCompositionSink = comp_sink.into();
-            let composition = comp_services.StartComposition(ec, &range, &comp_sink_iface)?;
-            log("DoEditSession: StartComposition OK");
-            // このパスではcompositionを`TipState`に保持し直す処理を省略している
-            // (次のキーイベントでのSetText差し替えはP1で実装する)。
-            let _ = composition;
+        let Some(ctx) = self.state.context.borrow().clone() else {
+            return Ok(());
+        };
+        let wtext = wide(&self.text);
+        // 末尾の\0は含めない(SetText/InsertTextAtSelectionはスライス長で判断する)。
+        let wtext = &wtext[..wtext.len().saturating_sub(1)];
+
+        let existing = self.state.composition.borrow().clone();
+        if let Some(composition) = existing {
+            unsafe {
+                let range: ITfRange = composition.GetRange()?;
+                range.SetText(ec, 0, wtext)?;
+            }
+            log("DoEditSession: SetText OK (既存compositionを更新)");
+        } else {
+            unsafe {
+                let insert: ITfInsertAtSelection = ctx.cast()?;
+                let comp_services: ITfContextOwnerCompositionServices = ctx.cast()?;
+                let range: ITfRange = insert.InsertTextAtSelection(
+                    ec,
+                    windows::Win32::UI::TextServices::INSERT_TEXT_AT_SELECTION_FLAGS(0),
+                    wtext,
+                )?;
+                let comp_sink = TipCompositionSink {
+                    state: self.state.clone(),
+                };
+                let comp_sink_iface: ITfCompositionSink = comp_sink.into();
+                let composition = comp_services.StartComposition(ec, &range, &comp_sink_iface)?;
+                self.state.composition.replace(Some(composition));
+            }
+            log("DoEditSession: StartComposition OK (新規composition)");
         }
         Ok(())
     }
 }
 
-/// composition強制終了(マウスクリック等)の検知。P0-3の受け入れ基準の一つ。
-/// 現時点ではログ出力のみ(preedit状態のクリーンアップはP1で実装)。
+/// 直前のcompositionを確定(`EndComposition`)するだけのedit session。
+/// `TipState::confirm_composition`から使う。
+#[implement(ITfEditSession)]
+struct TipEndCompositionSession {
+    state: Rc<TipState>,
+}
+
+impl ITfEditSession_Impl for TipEndCompositionSession_Impl {
+    fn DoEditSession(&self, ec: u32) -> Result<()> {
+        if let Some(composition) = self.state.composition.borrow().clone() {
+            unsafe {
+                composition.EndComposition(ec)?;
+            }
+            log("DoEditSession: EndComposition OK (確定)");
+        }
+        self.state.composition.take();
+        self.state.preedit.replace(String::new());
+        Ok(())
+    }
+}
+
+/// composition終了(自前のEndComposition・マウスクリック等の外部終了の両方)の
+/// 通知シンク。P0-3の受け入れ基準の一つ(外部終了の検知)。
 #[implement(ITfCompositionSink)]
-struct TipCompositionSink;
+struct TipCompositionSink {
+    state: Rc<TipState>,
+}
 
 impl ITfCompositionSink_Impl for TipCompositionSink_Impl {
     fn OnCompositionTerminated(
@@ -384,7 +457,9 @@ impl ITfCompositionSink_Impl for TipCompositionSink_Impl {
         _ecwrite: u32,
         _pcomposition: windows::core::Ref<'_, ITfComposition>,
     ) -> Result<()> {
-        log("OnCompositionTerminated (外部からのcomposition終了)");
+        log("OnCompositionTerminated (外部からのcomposition終了、preedit状態をクリア)");
+        self.state.composition.take();
+        self.state.preedit.replace(String::new());
         Ok(())
     }
 }
@@ -462,8 +537,16 @@ impl ITfKeyEventSink_Impl for KeySink_Impl {
 
         let resp = self.state.chord.borrow_mut().on_event(event, &phys);
         log(&format!("OnKeyDown vk=0x{vk:02X} class={classification:?} resp={resp:?}"));
-        self.state.apply_response(pic, &resp);
+        self.state.apply_response(&resp);
         self.state.apply_timers(&resp.timers);
+
+        // このキーがchordと無関係(NicolaFsmが消費しなかった)なら、直前の
+        // compositionが残っていれば確定する。本来の確定キー・変換UIはP1で
+        // 実装するが、それまで「どのキーを押しても確定できず操作不能になる」
+        // のを避ける安全弁として最低限これを入れる(実機テストで発覚した問題)。
+        if !resp.consumed {
+            self.state.confirm_composition();
+        }
 
         // 現時点ではキーを消費しない(投機出力の実処理・確定処理はP1で本実装する)。
         Ok(BOOL(0))
