@@ -65,6 +65,20 @@ fn now_ms() -> u64 {
 }
 use awase::yab::YabLayout;
 
+use libakaza::config::EngineConfig;
+use libakaza::engine::base::HenkanEngine;
+use libakaza::engine::bigram_word_viterbi_engine::{
+    BigramWordViterbiEngine, BigramWordViterbiEngineBuilder,
+};
+use libakaza::kana_kanji::marisa_kana_kanji_dict::MarisaKanaKanjiDict;
+use libakaza::lm::system_bigram::MarisaSystemBigramLM;
+use libakaza::lm::system_unigram_lm::MarisaSystemUnigramLM;
+
+/// P0-5: libakazaの具体的なエンジン型。`EngineConfig::default()`/
+/// `.build()`の戻り値がこの3型パラメータで単相化される(2026-08-24、
+/// akaza-im/akaza main の実ソースで確認)。
+type AkazaEngine = BigramWordViterbiEngine<MarisaSystemUnigramLM, MarisaSystemBigramLM, MarisaKanaKanjiDict>;
+
 // ── GUID(恒久。spikeの使い捨てGUIDとは別に採番) ──
 
 /// awaza TIPのCLSID。
@@ -220,6 +234,11 @@ struct TipState {
     chord: RefCell<ChordEngine>,
     composition: RefCell<Option<ITfComposition>>,
     preedit: RefCell<String>,
+    /// P0-5: libakazaエンジン。辞書・言語モデルが未導入だと`None`のまま
+    /// (design doc §9.1: 起動を拒否せず、未導入を明示するだけにする決定)。
+    /// まだ実際の変換フローには配線していない(候補UI・確定キーがP0-7/P1)。
+    /// ここでは「Windows MSVCでlibakazaがビルド・構築できるか」の検証が主目的。
+    engine: RefCell<Option<AkazaEngine>>,
 }
 
 /// NICOLA配列(`layout/nicola.yab`)を埋め込む。design doc ADR-011の
@@ -241,6 +260,20 @@ impl TipState {
             ConfirmMode::default(),
             30,
         );
+        let engine = match BigramWordViterbiEngineBuilder::new(EngineConfig::default()).build() {
+            Ok(engine) => {
+                log("libakaza engine構築成功(P0-5)");
+                Some(engine)
+            }
+            Err(e) => {
+                // design doc §9.1: 辞書・言語モデル未導入時は起動を継続する。
+                // 実際の「取得手順への導線」UIはP3のタスク(ここではログのみ)。
+                log(&format!(
+                    "libakaza engine構築失敗(辞書・言語モデル未導入の可能性、起動は継続): {e}"
+                ));
+                None
+            }
+        };
         Self {
             tid: Cell::new(0),
             hwnd: Cell::new(HWND::default()),
@@ -248,6 +281,7 @@ impl TipState {
             chord: RefCell::new(chord),
             composition: RefCell::new(None),
             preedit: RefCell::new(String::new()),
+            engine: RefCell::new(engine),
         }
     }
 
@@ -262,6 +296,20 @@ impl TipState {
         let resp = self.chord.borrow_mut().on_timeout(timer_id, &phys, composing);
         self.apply_response(&resp);
         self.apply_timers(&resp.timers);
+    }
+
+    /// P0-5: libakazaで実際に変換を試す(まだ確定キー等のUIには未配線。
+    /// エンジンが構築できているかどうかの動作確認のみが目的)。
+    fn try_convert(&self, yomi: &str) {
+        let engine_ref = self.engine.borrow();
+        let Some(engine) = engine_ref.as_ref() else {
+            log("try_convert: engine未構築のためスキップ");
+            return;
+        };
+        match engine.convert(yomi, None) {
+            Ok(candidates) => log(&format!("try_convert({yomi:?}) -> {} 文節", candidates.len())),
+            Err(e) => log(&format!("try_convert({yomi:?}) failed: {e}")),
+        }
     }
 
     /// `Response::timers`(`TimerCommand::Set`/`Kill`)を実際のWin32タイマーに反映する。
