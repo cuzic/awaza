@@ -15,6 +15,10 @@ crate-type = ["cdylib"]
 awaza-chord = { path = "../awaza-chord" }
 awase = { git = "https://github.com/cuzic/awase", tag = "v1.16.0" }
 timed-fsm = { git = "https://github.com/cuzic/awase", tag = "v1.16.0", package = "timed-fsm" }
+# awase-vkmapはまだリリースタグに乗っていない(refactor/awase-vkmap-extract、
+# PRレビュー待ち)。design doc §5の依存ピン規則はrevでのピンをPhase 0/1の
+# スパイクに限り許容している。マージ・リリースされ次第タグ参照に切り替える。
+awase-vkmap = { git = "https://github.com/cuzic/awase", rev = "28009198c88a873ce4d675d4ad7f3c1d22504baa", package = "awase-vkmap" }
 # libakaza: `branch = "main"` は禁止(design doc ADR-B)。crates.io未公開のためgitタグピン。
 libakaza = { git = "https://github.com/akaza-im/akaza", tag = "v2026.602.0" }
 anyhow.workspace = true
