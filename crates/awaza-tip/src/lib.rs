@@ -238,6 +238,7 @@ struct TipState {
     /// (design doc §9.1: 起動を拒否せず、未導入を明示するだけにする決定)。
     /// まだ実際の変換フローには配線していない(候補UI・確定キーがP0-7/P1)。
     /// ここでは「Windows MSVCでlibakazaがビルド・構築できるか」の検証が主目的。
+    #[allow(dead_code)] // 変換フロー配線(P1)まではtry_convert経由のテスト用途のみ
     engine: RefCell<Option<AkazaEngine>>,
 }
 
@@ -300,6 +301,7 @@ impl TipState {
 
     /// P0-5: libakazaで実際に変換を試す(まだ確定キー等のUIには未配線。
     /// エンジンが構築できているかどうかの動作確認のみが目的)。
+    #[allow(dead_code)] // 変換フロー配線(P1)まで未呼び出し
     fn try_convert(&self, yomi: &str) {
         let engine_ref = self.engine.borrow();
         let Some(engine) = engine_ref.as_ref() else {
@@ -343,16 +345,32 @@ impl TipState {
         }
         log(&format!("apply_response: {resp:?}"));
 
-        // 現時点ではKeyAction::Char由来のかな1文字をpreeditにそのまま反映する
-        // だけの実装とする。KeyAction::Romaji(拗音)・SpecialKey(Backspace)・
-        // その他のバリアントはP1で本実装する(ここでは無視してログに残すのみ)。
-        let mut text_to_show: Option<String> = None;
+        // KeyAction::Char由来のかな1文字をpreeditに追記する。
+        //
+        // design doc §7.3/D6: `SpecialKey(Backspace)`は`retract_and_replace`
+        // (src/engine/nicola_fsm.rs)が「直前の投機出力1文字をBackspace 1発で
+        // 取り消し、新しい面の文字に差し替える」ために生成する内部訂正シグナル
+        // であり、ユーザーが物理的に押したBackspaceキーとは発生源が異なる。
+        // 本FSMではこのバリアントは`retract_and_replace`(grep確認: 単一箇所)
+        // からしか出現せず、必ず直後に差し替え用のactionが同じ`resp.actions`
+        // 内に続く。一方、物理Backspaceキーは`classify_vk`で`Passthrough`に
+        // 分類され`on_event`のaction生成経路に乗らない(そのままアプリへ転送
+        // される)。したがって`resp.actions`中の`SpecialKey(Backspace)`は常に
+        // 「preeditの末尾1文字を取り消す」という意味で安全に解釈でき、
+        // 専用の`ChordOutcome`型を新設せずawaza側のこのマッピングだけで
+        // D6の要件(内部訂正と物理Backspaceの混同回避)を満たせる
+        // (design doc §7.3で保留されていたPhase 1確認事項の結論)。
+        let mut text = self.preedit.borrow().clone();
+        let mut changed = false;
         for action in &resp.actions {
             match action {
                 KeyAction::Char(c) => {
-                    let mut s = self.preedit.borrow().clone();
-                    s.push(*c);
-                    text_to_show = Some(s);
+                    text.push(*c);
+                    changed = true;
+                }
+                KeyAction::SpecialKey(awase::types::SpecialKey::Backspace) => {
+                    text.pop();
+                    changed = true;
                 }
                 other => {
                     log(&format!("apply_response: unhandled action {other:?} (P1で実装)"));
@@ -360,7 +378,7 @@ impl TipState {
             }
         }
 
-        if let Some(text) = text_to_show {
+        if changed {
             if let Err(e) = self.update_composition(&text) {
                 log(&format!("apply_response: update_composition failed: {e}"));
             } else {

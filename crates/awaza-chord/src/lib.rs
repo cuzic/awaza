@@ -5,7 +5,6 @@
 use awase::config::ConfirmMode;
 use awase::engine::input_tracker::PhysicalKeyState;
 use awase::engine::{InputContext, NicolaFsm};
-use awase::scanmap::PhysicalPos;
 use awase::types::{RawKeyEvent, VkCode};
 use awase::yab::YabLayout;
 
@@ -16,6 +15,7 @@ pub type ChordResponse = timed_fsm::Response<awase::types::KeyAction, usize>;
 
 /// NICOLA同時打鍵エンジンのラッパ。
 /// `NicolaFsm`自体が`Debug`を実装していないため`derive(Debug)`は付けない。
+#[allow(missing_debug_implementations)]
 pub struct ChordEngine {
     fsm: NicolaFsm,
 }
@@ -70,15 +70,4 @@ impl ChordEngine {
     pub fn physical_key_state(ctx: &InputContext, event: &RawKeyEvent) -> PhysicalKeyState {
         PhysicalKeyState::from_ctx(ctx, event)
     }
-}
-
-/// P0-6で実装する、TIPコンテキストでの物理キー分類の入口（仮スタブ）。
-/// 実体はP0-6で `awase-vkmap`（切り出し予定crate）を使って実装する。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TipKeyClassification {
-    LeftThumb,
-    RightThumb,
-    Char(PhysicalPos),
-    ImeControl,
-    Passthrough,
 }
