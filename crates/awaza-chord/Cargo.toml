@@ -14,8 +14,9 @@ path = "src/lib.rs"
 [dependencies]
 # awase / timed-fsm はタグピン(design doc ADR-B、`branch = "main"` は禁止)。
 # 現時点でのawase最新タグは v1.16.0。
-awase = { git = "https://github.com/cuzic/awase", tag = "v1.16.0" }
-timed-fsm = { git = "https://github.com/cuzic/awase", tag = "v1.16.0", package = "timed-fsm" }
+# awaza-tip/Cargo.tomlと同じrevに揃える(理由はそちらのコメント参照)。
+awase = { git = "https://github.com/cuzic/awase", rev = "28009198c88a873ce4d675d4ad7f3c1d22504baa" }
+timed-fsm = { git = "https://github.com/cuzic/awase", rev = "28009198c88a873ce4d675d4ad7f3c1d22504baa", package = "timed-fsm" }
 anyhow.workspace = true
 log.workspace = true
 

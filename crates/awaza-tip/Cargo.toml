@@ -13,8 +13,12 @@ crate-type = ["cdylib"]
 
 [dependencies]
 awaza-chord = { path = "../awaza-chord" }
-awase = { git = "https://github.com/cuzic/awase", tag = "v1.16.0" }
-timed-fsm = { git = "https://github.com/cuzic/awase", tag = "v1.16.0", package = "timed-fsm" }
+# awase-vkmapがまだrevピン(refactor/awase-vkmap-extract)なので、awase/timed-fsm
+# も同じrevに揃える(揃えないとCargoが別パッケージとして解決し、PhysicalPos等の
+# 型が2つに分裂してコンパイルエラーになる。design doc R-9で予見していたリスクが
+# 実際に発生・修正した、2026-08-25)。マージ・タグ発行後はタグ参照に統一する。
+awase = { git = "https://github.com/cuzic/awase", rev = "28009198c88a873ce4d675d4ad7f3c1d22504baa" }
+timed-fsm = { git = "https://github.com/cuzic/awase", rev = "28009198c88a873ce4d675d4ad7f3c1d22504baa", package = "timed-fsm" }
 # awase-vkmapはまだリリースタグに乗っていない(refactor/awase-vkmap-extract、
 # PRレビュー待ち)。design doc §5の依存ピン規則はrevでのピンをPhase 0/1の
 # スパイクに限り許容している。マージ・リリースされ次第タグ参照に切り替える。
