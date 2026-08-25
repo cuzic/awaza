@@ -222,13 +222,16 @@ struct TipState {
     preedit: RefCell<String>,
 }
 
+/// NICOLA配列(`layout/nicola.yab`)を埋め込む。design doc ADR-011の
+/// `YabLayout::builtin()`(awase本体側)への移行はP1で行う。それまでは
+/// awazaリポジトリ側にコピーを持つ(design doc §8.5の「二重化を避ける」
+/// 方針との一時的な妥協。P1でawase側の切り出しと同時に解消する)。
+const NICOLA_YAB: &str = include_str!("../layout/nicola.yab");
+
 impl TipState {
     fn new() -> Self {
-        // Phase 0時点では最小限のNICOLAレイアウトを埋め込みで使う。
-        // 本来はP0-6で`.yab`ファイルから読む(または`YabLayout::builtin()`、
-        // design doc ADR-011)。ここでは空レイアウトで起動だけ確認する。
-        let layout = YabLayout::parse("", awase::scanmap::KeyboardModel::Jis)
-            .expect("空文字列のレイアウトは常にパースできる(awase-linux/src/main.rsの前例踏襲)")
+        let layout = YabLayout::parse(NICOLA_YAB, awase::scanmap::KeyboardModel::Jis)
+            .expect("layout/nicola.yabは実機監査済み(2026-07-28)なので常にパースできるはず")
             .resolve_kana();
         let chord = ChordEngine::new(
             layout,
@@ -420,7 +423,7 @@ impl ITfKeyEventSink_Impl for KeySink_Impl {
         self.state.context.replace(Some(pic.clone()));
 
         let vk = u16::try_from(wparam.0).unwrap_or(0);
-        let classification = classify_vk(vk);
+        let (classification, physical_pos) = classify_vk(vk);
         let event = RawKeyEvent {
             vk_code: VkCode(vk),
             scan_code: awase::types::ScanCode(0),
@@ -428,7 +431,7 @@ impl ITfKeyEventSink_Impl for KeySink_Impl {
             extra_info: 0,
             timestamp: now_ms(),
             key_classification: classification,
-            physical_pos: None,
+            physical_pos,
             ime_relevance: ImeRelevance::default(),
             modifier_key: None,
             modifier_snapshot: ModifierState {
@@ -494,11 +497,73 @@ impl ITfKeyEventSink_Impl for KeySink_Impl {
 }
 
 /// P0-6の暫定版。VK→分類。恒久実装は`awase-vkmap`(切り出し予定crate)で行う。
-fn classify_vk(vk: u16) -> KeyClassification {
+/// Windows VK → 物理キー位置(JIS配列)。P0-6で`awase-vkmap`(切り出し予定crate)に
+/// 移す前の、`crates/awase-windows/src/vk.rs::vk_to_pos`の暫定コピー
+/// (ユーザー承認済み、2026-08-24。design doc §7.1参照)。文字キー(数字行・
+/// Q行・A行・Z行)のみを対象とする。
+fn vk_to_pos(vk: u16) -> Option<awase::scanmap::PhysicalPos> {
+    let (row, col) = match vk {
+        0x31 => (0, 0),
+        0x32 => (0, 1),
+        0x33 => (0, 2),
+        0x34 => (0, 3),
+        0x35 => (0, 4),
+        0x36 => (0, 5),
+        0x37 => (0, 6),
+        0x38 => (0, 7),
+        0x39 => (0, 8),
+        0x30 => (0, 9),
+        0xBD => (0, 10),
+        0xDE => (0, 11),
+        0xDC => (0, 12),
+        0x51 => (1, 0),
+        0x57 => (1, 1),
+        0x45 => (1, 2),
+        0x52 => (1, 3),
+        0x54 => (1, 4),
+        0x59 => (1, 5),
+        0x55 => (1, 6),
+        0x49 => (1, 7),
+        0x4F => (1, 8),
+        0x50 => (1, 9),
+        0xC0 => (1, 10),
+        0xDB => (1, 11),
+        0x41 => (2, 0),
+        0x53 => (2, 1),
+        0x44 => (2, 2),
+        0x46 => (2, 3),
+        0x47 => (2, 4),
+        0x48 => (2, 5),
+        0x4A => (2, 6),
+        0x4B => (2, 7),
+        0x4C => (2, 8),
+        0xBB => (2, 9),
+        0xBA => (2, 10),
+        0xDD => (2, 11),
+        0x5A => (3, 0),
+        0x58 => (3, 1),
+        0x43 => (3, 2),
+        0x56 => (3, 3),
+        0x42 => (3, 4),
+        0x4E => (3, 5),
+        0x4D => (3, 6),
+        0xBC => (3, 7),
+        0xBE => (3, 8),
+        0xBF => (3, 9),
+        0xE2 => (3, 10),
+        _ => return None,
+    };
+    Some(awase::scanmap::PhysicalPos::new(row, col))
+}
+
+fn classify_vk(vk: u16) -> (KeyClassification, Option<awase::scanmap::PhysicalPos>) {
     match vk {
-        VK_NONCONVERT => KeyClassification::LeftThumb,
-        VK_CONVERT => KeyClassification::RightThumb,
-        _ => KeyClassification::Passthrough,
+        VK_NONCONVERT => (KeyClassification::LeftThumb, None),
+        VK_CONVERT => (KeyClassification::RightThumb, None),
+        _ => match vk_to_pos(vk) {
+            Some(pos) => (KeyClassification::Char, Some(pos)),
+            None => (KeyClassification::Passthrough, None),
+        },
     }
 }
 
